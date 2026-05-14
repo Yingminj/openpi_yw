@@ -18,6 +18,7 @@ import openpi.models.pi0_config as pi0_config
 import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
+import openpi.policies.bimanual_eef_policy as bimanual_eef_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
@@ -352,6 +353,43 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBimanualEEFDataConfig(DataConfigFactory):
+    """Data config for bimanual end-effector datasets in LeRobot format."""
+
+    action_sequence_keys: Sequence[str] = ("actions",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "image": "observation.images.image",
+                        "left_wrist_image": "observation.images.left_wrist_image",
+                        "right_wrist_image": "observation.images.right_wrist_image",
+                        "state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_eef_policy.BimanualEEFInputs()],
+            outputs=[bimanual_eef_policy.BimanualEEFOutputs()],
+        )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=self.action_sequence_keys,
         )
 
 
@@ -964,6 +1002,120 @@ _CONFIGS = [
         overwrite=True,
         exp_name="debug_pi05",
         wandb_enabled=False,
+    ),
+    TrainConfig(
+        name="pi0_libero_low_mem_finetune_hzh",
+        # Here is an example of loading a pi0 model for LoRA fine-tuning.
+        model=pi0_config.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        data=LeRobotLiberoDataConfig(
+            #根据gemini的解释，当你本地已经下好数据的情况下，LeRobot可以通过自动识别repo_id来识别是本地路径还是云端路径。
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True), #语义指令自动挂载：自动从数据集中提取task任务，并将其挂载到VLA模型的prompt端
+            extra_delta_transform=True, #动作空间的增量转化：pi0采用的是预测当前机械臂的运动“增量”，而非“绝对值”，因此这里计算的是增量。
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/tianji/hzh/model_checkpoint/pi0_libero_low_mem_finetune_hzh/hzh_experiment/9999/params"),
+        
+        #训练超参数配置##########################################################################################
+        num_train_steps=10000,
+        batch_size=100, #此处先试试bs=2能不能用吧，如果不能的话，我再调小一点
+        # 设置学习率和优化器
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=5e-4,  # LoRA 可以用更高的学习率
+            decay_steps=10000,
+            decay_lr=1e-6,
+        ),
+        optimizer=_optimizer.AdamW(
+            clip_gradient_norm=1.0,
+        ),
+        ########################################################################################################
+        # The freeze filter defines which parameters should be frozen during training.
+        # We have a convenience function in the model config that returns the default freeze filter
+        # for the given model config for LoRA finetuning. Just make sure it matches the model config
+        # you chose above.
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA finetuning.
+        ema_decay=None,
+
+        #一些其他配置
+        log_interval=10, #wandb中输出loss的间隔
+        save_interval=500, #每经过500个训练步，物理保存一次当前模型的权重参数（check point）
+        keep_period=2000, # 永久存档锚点：强制系统每隔2000步（即第2000步、4000步、6000步等）生成一个绝对不被自动清理机制删除的永久权重备份。
+        wandb_enabled=True,
+    ),
+    TrainConfig(
+        name="pi05_red_cube_right_joint",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="/home/tianji/hzh/study/openpi/red_cube_right_joint_state",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=16,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=3e-5,
+            decay_steps=30_000,
+            decay_lr=1e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/home/tianji/hzh/study/openpi/checkpoint/pi05_base_pytorch",
+        num_train_steps=30_000,
+        log_interval=5,
+        save_interval=2000,
+        keep_period = 2000,
+        wandb_enabled=True,
+    ),
+    TrainConfig(
+        name="pi05_pick_and_place_260408data",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="/home/tianji/hzh/new_data/dataset_lerobot_0409_v2_eef_converted/train",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=16,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=3e-5,
+            decay_steps=30_000,
+            decay_lr=1e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/home/tianji/hzh/study/openpi/checkpoint/pi05_base_pytorch",
+        num_train_steps=30_000,
+        log_interval=10,
+        keep_period = 2000,
+        wandb_enabled=True,
+    ),
+    TrainConfig(
+        name="pi05_260513simulationdata",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotBimanualEEFDataConfig(
+            repo_id="/home/tianji/hzh/new_data/simulation_data_0513/converted_data_openpi",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=64,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=3e-5,
+            decay_steps=30000,
+            decay_lr=3e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/home/tianji/hzh/study/openpi/checkpoint/pi05_base_pytorch",
+        num_train_steps=30_000,
+        log_interval = 50,
+        keep_period = 2000,
+        wandb_enabled=True,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),

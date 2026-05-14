@@ -8,7 +8,9 @@ license = { file = "LICENSE" }
 dependencies = [
     "augmax>=0.3.4",
     "dm-tree>=0.1.8",
+    "datasets==4.7.0",
     "einops>=0.8.0",
+    "av==14.2.0",
     "equinox>=0.11.8",
     "flatbuffers>=24.3.25",
     "flax==0.10.2",
@@ -41,7 +43,7 @@ dependencies = [
 
 
 [project.urls]
-Repository = "https://github.com/Physical-Intelligence/openpi"
+Repository = "https://bgithub.xyz/Physical-Intelligence/openpi"
 
 [dependency-groups]
 dev = [
@@ -66,8 +68,8 @@ override-dependencies = ["ml-dtypes==0.4.1", "tensorstore==0.1.74"]
 
 [tool.uv.sources]
 openpi-client = { workspace = true }
-lerobot = { git = "https://github.com/huggingface/lerobot", rev = "0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" }
-dlimp = { git = "https://github.com/kvablack/dlimp", rev = "ad72ce3a9b414db2185bc0b38461d4101a65477a" }
+lerobot = { git = "https://bgithub.xyz/huggingface/lerobot", rev = "0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" }
+dlimp = { git = "https://bgithub.xyz/kvablack/dlimp", rev = "ad72ce3a9b414db2185bc0b38461d4101a65477a" }
 
 [tool.uv.workspace]
 members = ["packages/*"]
