@@ -19,8 +19,10 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.bimanual_eef_policy as bimanual_eef_policy
+import openpi.policies.bimanual_joint_policy as bimanual_joint_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.single_joint_policy as single_joint_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -384,6 +386,96 @@ class LeRobotBimanualEEFDataConfig(DataConfigFactory):
             inputs=[bimanual_eef_policy.BimanualEEFInputs()],
             outputs=[bimanual_eef_policy.BimanualEEFOutputs()],
         )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBimanualJointDataConfig(DataConfigFactory):
+    """Data config for 16-dim bimanual joint-position datasets in LeRobot format."""
+
+    use_delta_joint_actions: bool = False
+    action_sequence_keys: Sequence[str] = ("actions",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "image": "observation.images.image",
+                        "left_wrist_image": "observation.images.left_wrist_image",
+                        "right_wrist_image": "observation.images.right_wrist_image",
+                        "state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_joint_policy.BimanualJointInputs()],
+            outputs=[bimanual_joint_policy.BimanualJointOutputs()],
+        )
+        if self.use_delta_joint_actions:
+            # State/action layout: left joints (7), left gripper,
+            # right joints (7), right gripper. Grippers stay absolute.
+            delta_action_mask = _transforms.make_bool_mask(7, -1, 7, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotSingleJointDataConfig(DataConfigFactory):
+    """Data config for 8-dim single-arm joint-position datasets in LeRobot format."""
+
+    use_delta_joint_actions: bool = False
+    action_sequence_keys: Sequence[str] = ("actions",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "image": "observation.images.image",
+                        "right_wrist_image": "observation.images.right_wrist_image",
+                        "state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[single_joint_policy.SingleJointInputs()],
+            outputs=[single_joint_policy.SingleJointOutputs()],
+        )
+        if self.use_delta_joint_actions:
+            # State/action layout: right joints (7), right gripper.
+            delta_action_mask = _transforms.make_bool_mask(7, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
 
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
@@ -1225,6 +1317,36 @@ _CONFIGS = [
         keep_period = 2000,
         wandb_enabled=True,
         num_workers=16
+    ),
+    TrainConfig(
+        name="pi05_260617data_joint",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=50,
+            discrete_state_input=False
+        ),
+        data=LeRobotSingleJointDataConfig(
+            repo_id="/home/tianji/hzh/new_data/0617data/converted_data_joint_openpi_v2.1",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=16,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=5e-5,
+            decay_steps=50_000,
+            decay_lr=5e-7,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        #weight_loader=weight_loaders.CheckpointWeightLoader("/home/tianji/hzh/study/openpi/checkpoint/pi05_base/params"),
+        #pytorch_weight_path=None,
+        pytorch_weight_path="/home/tianji/hzh/study/openpi/checkpoint/pi05_base_pytorch",
+        num_train_steps=50_000,
+        log_interval = 100,
+        keep_period = 4000,
+        save_interval = 4000,
+        wandb_enabled=True,
+        num_workers=4
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
