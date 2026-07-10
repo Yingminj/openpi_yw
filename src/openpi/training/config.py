@@ -397,6 +397,43 @@ class LeRobotBimanualEEFDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotBimanualEEFQuatDataConfig(DataConfigFactory):
+    """Data config for 18-dim state / 16-dim action bimanual EEF quaternion datasets."""
+
+    action_sequence_keys: Sequence[str] = ("actions",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "image": "observation.images.image",
+                        "left_wrist_image": "observation.images.left_wrist_image",
+                        "right_wrist_image": "observation.images.right_wrist_image",
+                        "state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_eef_policy.BimanualEEFQuatInputs()],
+            outputs=[bimanual_eef_policy.BimanualEEFQuatOutputs()],
+        )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class LeRobotBimanualJointDataConfig(DataConfigFactory):
     """Data config for 16-dim bimanual joint-position datasets in LeRobot format."""
 
@@ -1347,6 +1384,36 @@ _CONFIGS = [
         save_interval = 4000,
         wandb_enabled=True,
         num_workers=4
+    ),
+    TrainConfig(
+        name="pi05_260626data_eef_quat",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=50,
+            discrete_state_input=True,  # pi0.5 encodes state into prompt tokens.
+        ),
+        data=LeRobotBimanualEEFQuatDataConfig(
+            repo_id="/home/tianji/hzh/new_data/0626data/converted_data_eef_quat_openpi",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=8,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=5e-5,
+            decay_steps=80_000,
+            decay_lr=5e-7,
+        ),
+        optimizer =_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/tianji/hzh/study/openpi/checkpoint/pi05_base"),
+        #pytorch_weight_path=None,
+        # pytorch_weight_path="/home/tianji/hzh/study/openpi/checkpoint/pi05_base_pytorch",
+        num_train_steps=80_000,
+        log_interval = 100,
+        keep_period = 4000,
+        save_interval = 4000,
+        wandb_enabled=False,
+        num_workers=2
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
