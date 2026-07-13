@@ -21,7 +21,10 @@ REPLACEMENTS = {
         'episode_indices = np.asarray(list(self.hf_dataset["episode_index"])).squeeze()'
     ),
     "key: torch.stack(self.hf_dataset.select(q_idx)[key])": (
-        "key: torch.as_tensor(list(self.hf_dataset.select(q_idx)[key]))"
+        "key: torch.stack(list(self.hf_dataset.select(q_idx)[key]))"
+    ),
+    "key: torch.as_tensor(list(self.hf_dataset.select(q_idx)[key]))": (
+        "key: torch.stack(list(self.hf_dataset.select(q_idx)[key]))"
     ),
 }
 
