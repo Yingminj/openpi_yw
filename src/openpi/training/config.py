@@ -19,6 +19,7 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.bimanual_eef_policy as bimanual_eef_policy
+import openpi.policies.bimanual_eef_rot6d_policy as bimanual_eef_rot6d_policy
 import openpi.policies.bimanual_joint_policy as bimanual_joint_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
@@ -424,6 +425,41 @@ class LeRobotBimanualEEFQuatDataConfig(DataConfigFactory):
             outputs=[bimanual_eef_policy.BimanualEEFQuatOutputs()],
         )
 
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBimanualEEFRot6DDataConfig(DataConfigFactory):
+    """Convert absolute 20D bimanual EEF poses into chunk-relative rotation-6D actions."""
+
+    action_sequence_keys: Sequence[str] = ("actions",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "image": "observation.images.image",
+                        "left_wrist_image": "observation.images.left_wrist_image",
+                        "right_wrist_image": "observation.images.right_wrist_image",
+                        "state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_eef_rot6d_policy.BimanualEEFRot6DInputs()],
+            outputs=[bimanual_eef_rot6d_policy.BimanualEEFRot6DOutputs()],
+        )
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=repack_transform,
@@ -1414,6 +1450,41 @@ _CONFIGS = [
         save_interval = 4000,
         wandb_enabled=False,
         num_workers=2
+    ),
+    # Marvin 双臂 EEF rotation 6D 训练配置。
+    # 数据集的 state/actions 都是 20D 绝对位姿；DataConfig 会在加载每个
+    # action chunk 后，以当前 state 为参考计算相对平移和相对旋转。
+    # rotation 6D 固定使用 PyTorch3D 的旋转矩阵前两行约定。
+    TrainConfig(
+        name="pi05_marvin_eef_rot6d",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=50,
+            discrete_state_input=True,
+        ),
+        data=LeRobotBimanualEEFRot6DDataConfig(
+            # TODO: 转换完成后替换为真实的 LeRobot v2.1 数据集路径。
+            repo_id="/home/tianji/hzh/new_data/REPLACE_WITH_OPENPI_ROT6D_DATASET",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=8,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=5e-5,
+            decay_steps=80_000,
+            decay_lr=5e-7,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/home/tianji/hzh/study/openpi/checkpoint/pi05_base"
+        ),
+        num_train_steps=80_000,
+        log_interval=100,
+        keep_period=4000,
+        save_interval=4000,
+        wandb_enabled=False,
+        num_workers=2,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
