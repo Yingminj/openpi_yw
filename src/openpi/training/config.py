@@ -1474,17 +1474,17 @@ _CONFIGS = [
             decay_steps=80_000,
             decay_lr=5e-7,
         ),
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        optimizer =_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/home/tianji/hzh/study/openpi/checkpoint/pi05_base"
-        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/ssd/hzh/openpi-hzh/checkpoint/pi05_base/params"),
+        #pytorch_weight_path=None,
+        # pytorch_weight_path="/home/tianji/hzh/study/openpi/checkpoint/pi05_base_pytorch",
         num_train_steps=80_000,
-        log_interval=100,
-        keep_period=4000,
-        save_interval=4000,
+        log_interval = 100,
+        keep_period = 4000,
+        save_interval = 4000,
         wandb_enabled=False,
-        num_workers=2,
+        num_workers=4
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
