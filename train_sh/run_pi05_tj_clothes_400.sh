@@ -5,7 +5,8 @@ set -euo pipefail
 PROJECT_ROOT="/ssd/hhw/openpi-hzh"
 CONFIG_NAME="pi05_yw_tidy_up"
 EXPERIMENT_NAME="pi0.5fine_tuning_tidy_up"
-DATASET_PATH="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_361"
+DATASET_PATH="${TIDY_UP_DATASET_ROOT:-/ssd/ying/lerobot_dataset/gripper/tidy_up_stationery_le}"
+export TIDY_UP_DATASET_ROOT="${DATASET_PATH}"
 LOG_PATH="${PROJECT_ROOT}/training_logs/${EXPERIMENT_NAME}.log"
 
 cd "${PROJECT_ROOT}"

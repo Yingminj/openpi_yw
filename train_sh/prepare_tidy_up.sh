@@ -2,11 +2,12 @@
 # Prepare the tidy_up_stationery_le dataset: compute normalization stats for pi05_yw_tidy_up.
 set -euo pipefail
 
-DATASET_ROOT="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_361"
+DATASET_ROOT="${TIDY_UP_DATASET_ROOT:-/ssd/ying/lerobot_dataset/gripper/tidy_up_stationery_le}"
+export TIDY_UP_DATASET_ROOT="${DATASET_ROOT}"
 CONFIG_NAME="pi05_yw_tidy_up"
 
-if [[ ! -e "${DATASET_ROOT}" ]]; then
-    echo "Dataset directory not found: ${DATASET_ROOT}" >&2
+if [[ ! -s "${DATASET_ROOT}/meta/info.json" ]]; then
+    echo "Not a LeRobot dataset (no meta/info.json): ${DATASET_ROOT}" >&2
     exit 1
 fi
 

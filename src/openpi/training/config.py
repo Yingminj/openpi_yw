@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 import difflib
 import logging
+import os
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -1814,7 +1815,10 @@ _CONFIGS = [
         exp_name="pi0.5fine_tuning_tidy_up",
         model=pi0_config.Pi0Config(pi05=True),
         data=LeRobotBimanualJointDataConfig(
-            repo_id="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_361",
+            # Same dataset lives at different paths per machine; override with TIDY_UP_DATASET_ROOT.
+            repo_id=os.environ.get(
+                "TIDY_UP_DATASET_ROOT", "/ssd/ying/lerobot_dataset/gripper/tidy_up_stationery_le"
+            ),
             base_config=DataConfig(prompt_from_task=False),
             image_key="observation.images.top",
             left_wrist_image_key="observation.images.wrist_L",

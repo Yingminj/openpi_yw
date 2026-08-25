@@ -390,6 +390,11 @@ def main(
         if direct_loader is not None:
             data_loader, num_batches = direct_loader
             print("Using direct LeRobot stats reader (image columns are skipped).")
+        else:
+            print(
+                f"No local LeRobot dataset at {data_config.repo_id!r} (missing meta/info.json); "
+                "falling back to the LeRobot loader, which will treat it as a Hugging Face repo id."
+            )
 
     if data_loader is None and data_config.rlds_data_dir is not None:
         data_loader, num_batches = create_rlds_dataloader(
