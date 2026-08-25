@@ -1814,14 +1814,16 @@ _CONFIGS = [
         exp_name="pi0.5fine_tuning_tidy_up",
         model=pi0_config.Pi0Config(pi05=True),
         data=LeRobotBimanualJointDataConfig(
-            repo_id="/ssd/ying/lerobot_dataset/gripper/tidy_up_stationery_le",
-            base_config=DataConfig(prompt_from_task=True),
+            repo_id="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_361",
+            base_config=DataConfig(prompt_from_task=False),
             image_key="observation.images.top",
             left_wrist_image_key="observation.images.wrist_L",
             right_wrist_image_key="observation.images.wrist_R",
             state_key="observation.state",
             actions_key="action",
             action_sequence_keys=("action",),
+            # The dataset's only task string is "Unspecified task"; use a real instruction instead.
+            default_prompt="Tidy up the stationery on the table.",
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
             "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params"

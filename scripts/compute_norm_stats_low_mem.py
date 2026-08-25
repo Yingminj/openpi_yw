@@ -99,7 +99,11 @@ def _load_v3_tasks(root: pathlib.Path) -> dict[int, str]:
     import pyarrow.parquet as pq
 
     tasks: dict[int, str] = {}
-    for path in sorted((root / "meta" / "tasks").glob("chunk-*/file-*.parquet")):
+    # LeRobot v3 writes either meta/tasks.parquet or meta/tasks/chunk-*/file-*.parquet.
+    paths = sorted((root / "meta" / "tasks").glob("chunk-*/file-*.parquet"))
+    if (root / "meta" / "tasks.parquet").is_file():
+        paths.append(root / "meta" / "tasks.parquet")
+    for path in paths:
         table = pq.read_table(path, columns=["task_index", "task"])
         for item in table.to_pylist():
             tasks[int(item["task_index"])] = item["task"]
@@ -182,6 +186,8 @@ def create_lerobot_v3_direct_dataloader(
                     raw.update({key: value[offset] for key, value in action_chunks.items()})
                     if "task_index" in raw and int(raw["task_index"]) in tasks:
                         raw["task"] = tasks[int(raw["task_index"])]
+                        if data_config.prompt_from_task:
+                            raw["prompt"] = raw["task"]
                     transformed = transform(raw)
                     for key in batch_values:
                         batch_values[key].append(np.asarray(transformed[key]))
