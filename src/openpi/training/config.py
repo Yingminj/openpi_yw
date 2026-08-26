@@ -18,6 +18,7 @@ import openpi.models.pi0_config as pi0_config
 import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
+import openpi.policies.bimanual_joint_policy as bimanual_joint_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
@@ -274,6 +275,44 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
             repack_transforms=self.repack_transforms,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBimanualJointDataConfig(DataConfigFactory):
+    """Transforms for 16-dim Marvain bimanual joint-position observations."""
+
+    action_sequence_keys: Sequence[str] = ("actions",)
+    image_key: str = "observation.images.image"
+    left_wrist_image_key: str = "observation.images.left_wrist_image"
+    right_wrist_image_key: str = "observation.images.right_wrist_image"
+    state_key: str = "state"
+    actions_key: str = "actions"
+    default_prompt: str | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_structure = {
+            "image": self.image_key,
+            "left_wrist_image": self.left_wrist_image_key,
+            "right_wrist_image": self.right_wrist_image_key,
+            "state": self.state_key,
+            "actions": self.actions_key,
+        }
+        if self.default_prompt is None:
+            repack_structure["prompt"] = "prompt"
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(
+                inputs=[_transforms.RepackTransform(repack_structure)]
+            ),
+            data_transforms=_transforms.Group(
+                inputs=[bimanual_joint_policy.BimanualJointInputs()],
+                outputs=[bimanual_joint_policy.BimanualJointOutputs()],
+            ),
+            model_transforms=ModelTransformFactory(default_prompt=self.default_prompt)(model_config),
             action_sequence_keys=self.action_sequence_keys,
         )
 
@@ -576,6 +615,76 @@ _CONFIGS = [
             assets=AssetsConfig(asset_id="trossen"),
         ),
         policy_metadata={"reset_pose": [0, -1.5, 1.5, 0, 0, 0]},
+    ),
+    # Local Marvain adapter for checkpoints trained with this native OpenPI config.
+    TrainConfig(
+        name="pi05_hhw_tj_clothes1_uniform",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/final_8_12_13_14_yellow_200_fm_zm_merged",
+            assets=AssetsConfig(asset_id="tj_clothes1"),
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            default_prompt=(
+                "Neatly stack the yellow clothes on the table and place them into the basket on the left."
+            ),
+        ),
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_zadai_200_uniform",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/zadai_200",
+            assets=AssetsConfig(asset_id="zadai_200"),
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            default_prompt=(
+                "Insert the tail of the yellow cable tie into its head to fasten it."
+            ),
+        ),
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_tankai_200_uniform",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/tankai_200",
+            assets=AssetsConfig(asset_id="tankai_200"),
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            default_prompt=(
+                "Spread out the crumpled garment on the table until it is fully open and flat."
+            ),
+        ),
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_clothes_400_uniform",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/clothes_400",
+            assets=AssetsConfig(asset_id="clothes_400"),
+            base_config=DataConfig(prompt_from_task=True),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+        ),
     ),
     TrainConfig(
         name="pi0_aloha_towel",
