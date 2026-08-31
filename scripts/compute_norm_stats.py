@@ -5,7 +5,11 @@ will compute the mean and standard deviation of the data in the dataset and save
 to the config assets directory.
 """
 
+import json
+import pathlib
+
 import numpy as np
+import polars as pl
 import tqdm
 import tyro
 
@@ -86,9 +90,100 @@ def create_rlds_dataloader(
     return data_loader, num_batches
 
 
+def compute_lerobot_v3_stats(
+    config: _config.TrainConfig,
+    data_config: _config.DataConfig,
+    max_frames: int | None = None,
+) -> bool:
+    """Compute stats directly from LeRobot v3 parquet data.
+
+    The OpenPI environment pins an older LeRobot reader. This path reproduces
+    its forward action-chunk indexing without decoding videos.
+    """
+    if data_config.repo_id is None:
+        return False
+
+    dataset_dir = pathlib.Path(data_config.repo_id)
+    info_path = dataset_dir / "meta" / "info.json"
+    if not info_path.is_file():
+        return False
+
+    info = json.loads(info_path.read_text())
+    if info.get("codebase_version") != "v3.0":
+        return False
+
+    data_files = sorted((dataset_dir / "data").rglob("*.parquet"))
+    if not data_files:
+        raise FileNotFoundError(f"No parquet data files found under {dataset_dir / 'data'}")
+
+    columns = ["observation.state", "action", "episode_index", "frame_index", "index"]
+    frame = pl.concat([pl.read_parquet(path, columns=columns) for path in data_files]).sort("index")
+    states = np.asarray(frame["observation.state"].to_list(), dtype=np.float32)
+    actions = np.asarray(frame["action"].to_list(), dtype=np.float32)
+    episode_indices = frame["episode_index"].to_numpy()
+    frame_indices = frame["frame_index"].to_numpy()
+
+    if states.ndim != 2 or actions.ndim != 2:
+        raise ValueError(
+            f"Expected 2D state/action arrays, got state={states.shape}, action={actions.shape}"
+        )
+    if states.shape[1] != actions.shape[1]:
+        raise ValueError(
+            f"State/action dimensions must match, got state={states.shape}, action={actions.shape}"
+        )
+    if len(states) != int(info["total_frames"]):
+        raise ValueError(f"Frame count mismatch: parquet={len(states)}, info={info['total_frames']}")
+
+    episode_starts = np.r_[0, np.flatnonzero(np.diff(episode_indices)) + 1]
+    episode_ends = np.r_[episode_starts[1:], len(episode_indices)]
+    end_index_by_frame = np.empty(len(episode_indices), dtype=np.int64)
+    for start, end in zip(episode_starts, episode_ends, strict=True):
+        expected_frames = np.arange(end - start)
+        if not np.array_equal(frame_indices[start:end], expected_frames):
+            raise ValueError(f"Non-contiguous frame_index values in episode {episode_indices[start]}")
+        end_index_by_frame[start:end] = end
+
+    frame_limit = len(states) if max_frames is None else min(max_frames, len(states))
+    num_batches = frame_limit // config.batch_size
+    usable_frames = num_batches * config.batch_size
+    if usable_frames == 0:
+        raise ValueError(
+            f"Need at least one full batch ({config.batch_size} frames), got {frame_limit}"
+        )
+
+    stats = {key: normalize.RunningStats() for key in ("state", "actions")}
+    horizon_offsets = np.arange(config.model.action_horizon, dtype=np.int64)
+    print(
+        f"Detected LeRobot v3 dataset with {len(states)} frames; "
+        f"computing {num_batches} batches directly from parquet."
+    )
+
+    for start in tqdm.tqdm(
+        range(0, usable_frames, config.batch_size),
+        total=num_batches,
+        desc="Computing stats",
+    ):
+        indices = np.arange(start, start + config.batch_size, dtype=np.int64)
+        action_indices = np.minimum(
+            indices[:, None] + horizon_offsets[None, :],
+            end_index_by_frame[indices, None] - 1,
+        )
+        stats["state"].update(states[indices])
+        stats["actions"].update(actions[action_indices])
+
+    norm_stats = {key: value.get_statistics() for key, value in stats.items()}
+    output_path = config.assets_dirs / data_config.repo_id
+    print(f"Writing stats to: {output_path}")
+    normalize.save(output_path, norm_stats)
+    return True
+
+
 def main(config_name: str, max_frames: int | None = None):
     config = _config.get_config(config_name)
     data_config = config.data.create(config.assets_dirs, config.model)
+
+    if compute_lerobot_v3_stats(config, data_config, max_frames):
+        return
 
     if data_config.rlds_data_dir is not None:
         data_loader, num_batches = create_rlds_dataloader(

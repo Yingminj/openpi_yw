@@ -40,6 +40,7 @@ import torch.nn.parallel
 import tqdm
 import wandb
 
+import openpi.models.model
 import openpi.models.pi0_config
 import openpi.models_pytorch.pi0_pytorch
 import openpi.shared.normalize as _normalize
@@ -397,6 +398,7 @@ def train_loop(config: _config.TrainConfig):
             action_dim=config.model.action_dim,
             action_horizon=config.model.action_horizon,
             max_token_len=config.model.max_token_len,
+            image_resolution=getattr(config.model, "image_resolution", openpi.models.model.IMAGE_RESOLUTION),
             paligemma_variant=getattr(config.model, "paligemma_variant", "gemma_2b"),
             action_expert_variant=getattr(config.model, "action_expert_variant", "gemma_300m"),
             pi05=getattr(config.model, "pi05", False),

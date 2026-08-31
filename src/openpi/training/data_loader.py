@@ -14,6 +14,10 @@ import torch
 import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
+from openpi.training.keyframe_sampler import ContinuousEpochSampler
+from openpi.training.keyframe_sampler import KeyframeRepeatSampler
+from openpi.training.v3_lerobot_dataset import LeRobotV3Dataset
+from openpi.training.v3_lerobot_dataset import is_lerobot_v3_dataset
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -136,6 +140,9 @@ def create_torch_dataset(
         raise ValueError("Repo ID is not set. Cannot create dataset.")
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
+
+    if is_lerobot_v3_dataset(repo_id):
+        return LeRobotV3Dataset(repo_id, action_horizon)
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
     dataset = lerobot_dataset.LeRobotDataset(
@@ -299,13 +306,29 @@ def create_torch_data_loader(
             execute in the main process.
         seed: The seed to use for shuffling the data.
     """
-    dataset = create_torch_dataset(data_config, action_horizon, model_config)
-    dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
+    raw_dataset = create_torch_dataset(data_config, action_horizon, model_config)
 
     # Use TorchDataLoader for both frameworks
     # For PyTorch DDP, create DistributedSampler and divide batch size by world size
     # For JAX, divide by process count
     sampler = None
+    if data_config.keyframe_sampling is not None:
+        if framework == "pytorch" and torch.distributed.is_initialized():
+            raise NotImplementedError("Keyframe sampling with PyTorch distributed training is not supported.")
+        if not hasattr(raw_dataset, "episode_lengths"):
+            raise ValueError("Keyframe sampling requires a dataset that exposes episode_lengths.")
+        epoch_sampler = KeyframeRepeatSampler(
+            raw_dataset.episode_lengths,
+            data_config.keyframe_sampling,
+            seed=seed,
+            shuffle=shuffle,
+        )
+        if hasattr(raw_dataset, "set_frame_labels"):
+            raw_dataset.set_frame_labels(epoch_sampler.labels)
+        sampler = ContinuousEpochSampler(epoch_sampler)
+
+    dataset = transform_dataset(raw_dataset, data_config, skip_norm_stats=skip_norm_stats)
+
     if framework == "pytorch":
         if torch.distributed.is_initialized():
             sampler = torch.utils.data.distributed.DistributedSampler(
