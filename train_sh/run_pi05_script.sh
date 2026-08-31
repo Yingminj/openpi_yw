@@ -30,6 +30,12 @@ mkdir -p "${PROJECT_ROOT}/training_logs"
 
 # Drop any inherited PYTHONPATH (e.g. /opt/ros) before prepending this checkout.
 export PYTHONPATH="${PROJECT_ROOT}/src:${PROJECT_ROOT}/packages/openpi-client/src"
+# Base weights: prefer a local copy, else download from the public bucket.
+LOCAL_PI05_BASE="${PROJECT_ROOT}/checkpoint/pi05_base/params"
+if [[ -z "${PI05_BASE_CHECKPOINT:-}" && -d "${LOCAL_PI05_BASE}" ]]; then
+    export PI05_BASE_CHECKPOINT="${LOCAL_PI05_BASE}"
+fi
+
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 export PYTHONUNBUFFERED="1"
 
