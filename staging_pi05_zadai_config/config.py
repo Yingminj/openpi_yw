@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 import difflib
 import logging
+import os
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -1738,6 +1739,170 @@ _CONFIGS = [
             warmup_steps=2_000,
             peak_lr=2.5e-5,
             decay_steps=150_000,
+            decay_lr=1.0e-6,
+        ),
+        save_interval=10_000,
+        keep_period=50_000,
+        wandb_enabled=False,
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_tankai_200_uniform",
+        exp_name="pi0.5fine_tuning_tj_tankai_200",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/tankai_200",
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            default_prompt=(
+                "Spread out the crumpled garment on the table until it is fully open and flat."
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params"
+        ),
+        # Global batch 12 across six devices gives a per-device batch of 2.
+        batch_size=12,
+        num_workers=24,
+        num_train_steps=150_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=2_000,
+            peak_lr=2.5e-5,
+            decay_steps=150_000,
+            decay_lr=1.0e-6,
+        ),
+        save_interval=10_000,
+        keep_period=50_000,
+        wandb_enabled=False,
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_clothes_400_uniform",
+        exp_name="pi0.5fine_tuning_tj_clothes_400",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/clothes_400",
+            base_config=DataConfig(prompt_from_task=True),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params"
+        ),
+        # Global batch 12 across six devices gives a per-device batch of 2.
+        batch_size=12,
+        num_workers=24,
+        num_train_steps=150_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=2_000,
+            peak_lr=2.5e-5,
+            decay_steps=150_000,
+            decay_lr=1.0e-6,
+        ),
+        save_interval=10_000,
+        keep_period=50_000,
+        wandb_enabled=False,
+    ),
+    TrainConfig(
+        name="pi05_yw_package",
+        exp_name="pi0.5fine_tuning_package",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            # Same dataset lives at different paths per machine; override with TIDY_UP_DATASET_ROOT.
+            repo_id=os.environ.get(
+                "TIDY_UP_DATASET_ROOT", "/ssd/ying/lerobot_dataset/gripper/package_head_lerobot"
+            ),
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            # The dataset's only task string is "Unspecified task"; use a real instruction instead.
+            default_prompt="Pick up the zippered bag, unzip it, and finally place it in the basket.",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params"
+        ),
+        # Global batch 16 across four devices gives a per-device batch of 4.
+        batch_size=12,
+        num_workers=24,
+        num_train_steps=150_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=2_000,
+            peak_lr=2.5e-5,
+            decay_steps=150_000,
+            decay_lr=1.0e-6,
+        ),
+        save_interval=10_000,
+        keep_period=50_000,
+        wandb_enabled=True,
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_zadai_200_uniform",
+        exp_name="pi0.5fine_tuning_tj_zadai_200",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/zadai_200",
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            default_prompt="Insert the tail of the yellow cable tie into its head to fasten it.",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params"
+        ),
+        # Global batch 12 across six devices gives a per-device batch of 2.
+        batch_size=12,
+        num_workers=24,
+        num_train_steps=150_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=2_000,
+            peak_lr=2.5e-5,
+            decay_steps=150_000,
+            decay_lr=1.0e-6,
+        ),
+        save_interval=10_000,
+        keep_period=50_000,
+        wandb_enabled=False,
+    ),
+    TrainConfig(
+        name="pi05_hhw_tj_zadai_200_pytorch_uniform",
+        exp_name="pi0.5fine_tuning_tj_zadai_200py",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            repo_id="/ssd/hhw/tianji/zadai_200",
+            base_config=DataConfig(prompt_from_task=False, keyframe_sampling=None),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            default_prompt="Insert the tail of the yellow cable tie into its head to fasten it.",
+        ),
+        pytorch_weight_path="/ssd/hhw/openpi-hzh/checkpoint/pi05_base_pytorch_bfloat16",
+        pytorch_training_precision="bfloat16",
+        # Global batch 48 across four devices gives a per-device batch of 12.
+        batch_size=48,
+        num_workers=8,
+        num_train_steps=100_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=2_000,
+            peak_lr=2.5e-5,
+            decay_steps=100_000,
             decay_lr=1.0e-6,
         ),
         save_interval=10_000,
