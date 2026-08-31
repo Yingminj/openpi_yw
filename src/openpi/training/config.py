@@ -289,44 +289,6 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
-class LeRobotBimanualJointDataConfig(DataConfigFactory):
-    """Transforms for 16-dim Marvain bimanual joint-position observations."""
-
-    action_sequence_keys: Sequence[str] = ("actions",)
-    image_key: str = "observation.images.image"
-    left_wrist_image_key: str = "observation.images.left_wrist_image"
-    right_wrist_image_key: str = "observation.images.right_wrist_image"
-    state_key: str = "state"
-    actions_key: str = "actions"
-    default_prompt: str | None = None
-
-    @override
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
-        repack_structure = {
-            "image": self.image_key,
-            "left_wrist_image": self.left_wrist_image_key,
-            "right_wrist_image": self.right_wrist_image_key,
-            "state": self.state_key,
-            "actions": self.actions_key,
-        }
-        if self.default_prompt is None:
-            repack_structure["prompt"] = "prompt"
-
-        return dataclasses.replace(
-            self.create_base_config(assets_dirs, model_config),
-            repack_transforms=_transforms.Group(
-                inputs=[_transforms.RepackTransform(repack_structure)]
-            ),
-            data_transforms=_transforms.Group(
-                inputs=[bimanual_joint_policy.BimanualJointInputs()],
-                outputs=[bimanual_joint_policy.BimanualJointOutputs()],
-            ),
-            model_transforms=ModelTransformFactory(default_prompt=self.default_prompt)(model_config),
-            action_sequence_keys=self.action_sequence_keys,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
 class LeRobotLiberoDataConfig(DataConfigFactory):
     """
     This config is used to configure transforms that are applied at various parts of the data pipeline.
@@ -514,8 +476,10 @@ class LeRobotBimanualEEFRot6DDataConfig(DataConfigFactory):
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotBimanualJointDataConfig(DataConfigFactory):
-    """Data config for 16-dim bimanual joint-position datasets in LeRobot format."""
+    """Data config for bimanual LeRobot datasets: 16-dim joint-position or 14-dim EEF."""
 
+    # 16 = 14 joints + 2 grippers; 14 = 12 EEF pose dims + 2 grippers.
+    action_dim: int = bimanual_joint_policy.JOINT_ACTION_DIM
     use_delta_joint_actions: bool = False
     action_sequence_keys: Sequence[str] = ("actions",)
     image_key: str = "observation.images.image"
@@ -544,13 +508,12 @@ class LeRobotBimanualJointDataConfig(DataConfigFactory):
         )
 
         data_transforms = _transforms.Group(
-            inputs=[bimanual_joint_policy.BimanualJointInputs()],
-            outputs=[bimanual_joint_policy.BimanualJointOutputs()],
+            inputs=[bimanual_joint_policy.BimanualJointInputs(action_dim=self.action_dim)],
+            outputs=[bimanual_joint_policy.BimanualJointOutputs(action_dim=self.action_dim)],
         )
         if self.use_delta_joint_actions:
-            # State/action layout: left joints (7), left gripper,
-            # right joints (7), right gripper. Grippers stay absolute.
-            delta_action_mask = _transforms.make_bool_mask(7, -1, 7, -1)
+            # Both layouts end with the two gripper dims, which stay absolute.
+            delta_action_mask = _transforms.make_bool_mask(self.action_dim - 2, -2)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -864,6 +827,12 @@ class TrainConfig:
 
 
 # Use `get_config` if you need to get a config by name in your code.
+# pi0.5 base weights: a local copy on the training box, else the public bucket
+# (downloaded once into ~/.cache/openpi). Override with PI05_BASE_CHECKPOINT.
+_PI05_BASE_CHECKPOINT = os.environ.get(
+    "PI05_BASE_CHECKPOINT", "gs://openpi-assets/checkpoints/pi05_base/params"
+)
+
 _CONFIGS = [
     #
     # Inference Aloha configs.
@@ -883,76 +852,6 @@ _CONFIGS = [
             assets=AssetsConfig(asset_id="trossen"),
         ),
         policy_metadata={"reset_pose": [0, -1.5, 1.5, 0, 0, 0]},
-    ),
-    # Local Marvain adapter for checkpoints trained with this native OpenPI config.
-    TrainConfig(
-        name="pi05_hhw_tj_clothes1_uniform",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LeRobotBimanualJointDataConfig(
-            repo_id="/ssd/hhw/tianji/final_8_12_13_14_yellow_200_fm_zm_merged",
-            assets=AssetsConfig(asset_id="tj_clothes1"),
-            base_config=DataConfig(prompt_from_task=False),
-            image_key="observation.images.top",
-            left_wrist_image_key="observation.images.wrist_L",
-            right_wrist_image_key="observation.images.wrist_R",
-            state_key="observation.state",
-            actions_key="action",
-            action_sequence_keys=("action",),
-            default_prompt=(
-                "Neatly stack the yellow clothes on the table and place them into the basket on the left."
-            ),
-        ),
-    ),
-    TrainConfig(
-        name="pi05_hhw_tj_zadai_200_uniform",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LeRobotBimanualJointDataConfig(
-            repo_id="/ssd/hhw/tianji/zadai_200",
-            assets=AssetsConfig(asset_id="zadai_200"),
-            base_config=DataConfig(prompt_from_task=False),
-            image_key="observation.images.top",
-            left_wrist_image_key="observation.images.wrist_L",
-            right_wrist_image_key="observation.images.wrist_R",
-            state_key="observation.state",
-            actions_key="action",
-            action_sequence_keys=("action",),
-            default_prompt=(
-                "Insert the tail of the yellow cable tie into its head to fasten it."
-            ),
-        ),
-    ),
-    TrainConfig(
-        name="pi05_hhw_tj_tankai_200_uniform",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LeRobotBimanualJointDataConfig(
-            repo_id="/ssd/hhw/tianji/tankai_200",
-            assets=AssetsConfig(asset_id="tankai_200"),
-            base_config=DataConfig(prompt_from_task=False),
-            image_key="observation.images.top",
-            left_wrist_image_key="observation.images.wrist_L",
-            right_wrist_image_key="observation.images.wrist_R",
-            state_key="observation.state",
-            actions_key="action",
-            action_sequence_keys=("action",),
-            default_prompt=(
-                "Spread out the crumpled garment on the table until it is fully open and flat."
-            ),
-        ),
-    ),
-    TrainConfig(
-        name="pi05_hhw_tj_clothes_400_uniform",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LeRobotBimanualJointDataConfig(
-            repo_id="/ssd/hhw/tianji/clothes_400",
-            assets=AssetsConfig(asset_id="clothes_400"),
-            base_config=DataConfig(prompt_from_task=True),
-            image_key="observation.images.top",
-            left_wrist_image_key="observation.images.wrist_L",
-            right_wrist_image_key="observation.images.wrist_R",
-            state_key="observation.state",
-            actions_key="action",
-            action_sequence_keys=("action",),
-        ),
     ),
     TrainConfig(
         name="pi0_aloha_towel",
@@ -1919,13 +1818,14 @@ _CONFIGS = [
         wandb_enabled=False,
     ),
     TrainConfig(
-        name="pi05_yw_tidy_up",
-        exp_name="pi0.5fine_tuning_tidy_up_ad_prompt",
+        name="pi05_yw_tidy_up_eef",
+        exp_name="pi0.5fine_tuning_tidy_up_eef",
         model=pi0_config.Pi0Config(pi05=True),
         data=LeRobotBimanualJointDataConfig(
             # Same dataset lives at different paths per machine; override with TIDY_UP_DATASET_ROOT.
             repo_id=os.environ.get(
-                "TIDY_UP_DATASET_ROOT", "/ssd/ying/lerobot_dataset/gripper/tidy_up_stationery_le"
+                "TIDY_UP_DATASET_ROOT",
+                "/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_505_eef",
             ),
             base_config=DataConfig(prompt_from_task=False),
             image_key="observation.images.top",
@@ -1934,12 +1834,47 @@ _CONFIGS = [
             state_key="observation.state",
             actions_key="action",
             action_sequence_keys=("action",),
+            # 12 EEF pose dims (xyz+rpy per arm) + 2 grippers.
+            action_dim=14,
             # The dataset's only task string is "Unspecified task"; use a real instruction instead.
             default_prompt="Grab the pen cap from the table, put the cap back on, and finally place it in the pen holder.",
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params"
+        weight_loader=weight_loaders.CheckpointWeightLoader(_PI05_BASE_CHECKPOINT),
+        batch_size=16,
+        num_workers=24,
+        num_train_steps=150_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=2_000,
+            peak_lr=2.5e-5,
+            decay_steps=150_000,
+            decay_lr=1.0e-6,
         ),
+        save_interval=10_000,
+        keep_period=50_000,
+        wandb_enabled=True,
+    ),
+    TrainConfig(
+        name="pi05_yw_tidy_up",
+        exp_name="pi0.5fine_tuning_tidy_up_ad_prompt",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBimanualJointDataConfig(
+            # Same dataset lives at different paths per machine; override with TIDY_UP_DATASET_ROOT.
+            repo_id=os.environ.get(
+                "TIDY_UP_DATASET_ROOT",
+                "/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_505",
+            ),
+            base_config=DataConfig(prompt_from_task=False),
+            image_key="observation.images.top",
+            left_wrist_image_key="observation.images.wrist_L",
+            right_wrist_image_key="observation.images.wrist_R",
+            state_key="observation.state",
+            actions_key="action",
+            action_sequence_keys=("action",),
+            action_dim=16,
+            # The dataset's only task string is "Unspecified task"; use a real instruction instead.
+            default_prompt="Grab the pen cap from the table, put the cap back on, and finally place it in the pen holder.",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(_PI05_BASE_CHECKPOINT),
         # Global batch 16 across four devices gives a per-device batch of 4.
         batch_size=16,
         num_workers=24,

@@ -31,6 +31,21 @@ def test_bimanual_joint_outputs_remove_model_padding():
     np.testing.assert_array_equal(result["actions"], actions[:, :16])
 
 
+def test_bimanual_eef_roundtrip_at_14_dims():
+    inputs = bimanual_joint_policy.BimanualJointInputs(action_dim=14)(_example(state_dim=14, action_dim=14))
+    assert inputs["state"].shape == (14,)
+    assert inputs["actions"].shape == (15, 14)
+
+    actions = np.arange(15 * 32, dtype=np.float32).reshape(15, 32)
+    result = bimanual_joint_policy.BimanualJointOutputs(action_dim=14)({"actions": actions})
+    np.testing.assert_array_equal(result["actions"], actions[:, :14])
+
+
+def test_bimanual_eef_inputs_reject_joint_dimensions():
+    with pytest.raises(ValueError, match="14 dims"):
+        bimanual_joint_policy.BimanualJointInputs(action_dim=14)(_example())
+
+
 @pytest.mark.parametrize("field", ["state", "actions"])
 def test_bimanual_joint_inputs_reject_wrong_dimensions(field: str):
     example = _example()
