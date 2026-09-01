@@ -4,8 +4,8 @@ set -euo pipefail
 
 MODE="${MODE:-eef}"
 case "${MODE}" in
-    eef)   CONFIG_NAME="pi05_yw_tidy_up_eef"; DEFAULT_ROOT="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_505_eef" ;;
-    joint) CONFIG_NAME="pi05_yw_tidy_up";     DEFAULT_ROOT="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_505" ;;
+    eef)   CONFIG_NAME="pi05_yw_tidy_up_eef"; DEFAULT_ROOT="/ssd/ying/lerobot_test_yingminj/gripper/tidy_up_505_eef" ;;
+    # joint) CONFIG_NAME="pi05_yw_tidy_up";     DEFAULT_ROOT="/mnt/robot_platform/datasets/tidy_up_stationery_le/batch_success_505" ;;
     *) echo "MODE must be 'eef' or 'joint', got '${MODE}'" >&2; exit 1 ;;
 esac
 
@@ -17,7 +17,7 @@ if [[ ! -s "${DATASET_ROOT}/meta/info.json" ]]; then
     exit 1
 fi
 
-OPENPI_ROOT="${OPENPI_ROOT:-/home/kewei/YING/openpi_yw}"
+OPENPI_ROOT="${OPENPI_ROOT:-/ssd/hhw/openpi-hzh}"
 UV_BIN="${UV_BIN:-$(command -v uv)}"
 cd "${OPENPI_ROOT}"
 
