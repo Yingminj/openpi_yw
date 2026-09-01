@@ -172,7 +172,7 @@ Once training is complete, we can run inference by spinning up a policy server a
 uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_libero --policy.dir=checkpoints/pi05_libero/my_experiment/20000
 ```
 
-This will spin up a server that listens on port 8000 and waits for observations to be sent to it. We can then run an evaluation script (or robot runtime) that queries the server.
+This will spin up a server that listens on port 1234 and waits for observations to be sent to it. We can then run an evaluation script (or robot runtime) that queries the server.
 
 For running the LIBERO eval in particular, we provide (and recommend using) a Dockerized workflow that handles both the policy server and the evaluation script together. See the [LIBERO README](examples/libero/README.md) for more details.
 

@@ -15,6 +15,7 @@ from typing_extensions import override
 
 from openpi import transforms as _transforms
 from openpi.models import model as _model
+from openpi.models import rtc as _rtc
 from openpi.shared import array_typing as at
 from openpi.shared import nnx_utils
 
@@ -65,7 +66,19 @@ class Policy(BasePolicy):
             self._rng = rng or jax.random.key(0)
 
     @override
-    def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+    def infer(
+        self,
+        obs: dict,
+        *,
+        noise: np.ndarray | None = None,
+        inference_delay: int | None = None,
+        prev_chunk_left_over: np.ndarray | None = None,
+        prev_chunk_left_over_len: int | None = None,
+        prefix_horizon: int | None = None,
+        max_guidance_weight: float | None = None,
+        prefix_attention_schedule: str = "EXP",
+        return_raw_actions: bool = False,
+    ) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
         inputs = self._input_transform(inputs)
@@ -87,6 +100,30 @@ class Policy(BasePolicy):
                 noise = noise[None, ...]  # Make it (1, action_horizon, action_dim)
             sample_kwargs["noise"] = noise
 
+        if prev_chunk_left_over is not None:
+            if self._is_pytorch_model:
+                raise NotImplementedError("Native OpenPI RTC is currently supported only by the JAX Pi0/Pi0.5 model")
+            previous = jnp.asarray(prev_chunk_left_over)
+            if previous.ndim == 2:
+                previous = previous[None, ...]
+            sample_kwargs["prev_chunk_left_over"] = previous
+            sample_kwargs["prev_chunk_left_over_len"] = jnp.asarray(
+                previous.shape[1] if prev_chunk_left_over_len is None else prev_chunk_left_over_len,
+                dtype=jnp.int32,
+            )
+            sample_kwargs["inference_delay"] = jnp.asarray(inference_delay or 0, dtype=jnp.int32)
+            sample_kwargs["prefix_horizon"] = jnp.asarray(
+                previous.shape[1] if prefix_horizon is None else prefix_horizon,
+                dtype=jnp.int32,
+            )
+            sample_kwargs["max_guidance_weight"] = jnp.asarray(
+                10.0 if max_guidance_weight is None else max_guidance_weight,
+                dtype=jnp.float32,
+            )
+            sample_kwargs["prefix_attention_schedule"] = jnp.asarray(
+                _rtc.schedule_code(prefix_attention_schedule), dtype=jnp.int32
+            )
+
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()
         outputs = {
@@ -94,12 +131,20 @@ class Policy(BasePolicy):
             "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
         }
         model_time = time.monotonic() - start_time
+        raw_actions = None
+        if return_raw_actions:
+            if self._is_pytorch_model:
+                raw_actions = np.asarray(outputs["actions"][0, ...].detach().cpu())
+            else:
+                raw_actions = np.asarray(outputs["actions"][0, ...])
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
         else:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
 
         outputs = self._output_transform(outputs)
+        if raw_actions is not None:
+            outputs["raw_actions"] = raw_actions
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }
@@ -122,8 +167,8 @@ class PolicyRecorder(_base_policy.BasePolicy):
         self._record_step = 0
 
     @override
-    def infer(self, obs: dict) -> dict:  # type: ignore[misc]
-        results = self._policy.infer(obs)
+    def infer(self, obs: dict, **kwargs) -> dict:  # type: ignore[misc]
+        results = self._policy.infer(obs, **kwargs)
 
         data = {"inputs": obs, "outputs": results}
         data = flax.traverse_util.flatten_dict(data, sep="/")

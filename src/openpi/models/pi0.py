@@ -10,6 +10,7 @@ from typing_extensions import override
 from openpi.models import model as _model
 from openpi.models import pi0_config
 import openpi.models.gemma as _gemma
+from openpi.models.rtc import get_prefix_weights
 import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
 
@@ -224,6 +225,12 @@ class Pi0(_model.BaseModel):
         *,
         num_steps: int | at.Int[at.Array, ""] = 10,
         noise: at.Float[at.Array, "b ah ad"] | None = None,
+        prev_chunk_left_over: at.Float[at.Array, "b ah ad"] | None = None,
+        prev_chunk_left_over_len: int | at.Int[at.Array, ""] | None = None,
+        inference_delay: int | at.Int[at.Array, ""] = 0,
+        prefix_horizon: int | at.Int[at.Array, ""] | None = None,
+        max_guidance_weight: float | at.Float[at.Array, ""] = 10.0,
+        prefix_attention_schedule: int | at.Int[at.Array, ""] = 3,
     ) -> _model.Actions:
         observation = _model.preprocess_observation(
             None, observation, train=False, image_resolution=self.image_resolution
@@ -240,6 +247,23 @@ class Pi0(_model.BaseModel):
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+
+        if prev_chunk_left_over is not None:
+            return self._sample_actions_rtc(
+                observation,
+                noise,
+                prefix_mask,
+                kv_cache,
+                num_steps=num_steps,
+                dt=dt,
+                batch_size=batch_size,
+                prev_chunk_left_over=prev_chunk_left_over,
+                prev_chunk_left_over_len=prev_chunk_left_over_len,
+                inference_delay=inference_delay,
+                prefix_horizon=prefix_horizon,
+                max_guidance_weight=max_guidance_weight,
+                prefix_attention_schedule=prefix_attention_schedule,
+            )
 
         def step(carry):
             x_t, time = carry
@@ -281,4 +305,81 @@ class Pi0(_model.BaseModel):
             return time >= -dt / 2
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+        return x_0
+
+    def _sample_actions_rtc(
+        self,
+        observation: _model.Observation,
+        noise: jax.Array,
+        prefix_mask: jax.Array,
+        kv_cache,
+        *,
+        num_steps: int,
+        dt: float,
+        batch_size: int,
+        prev_chunk_left_over: jax.Array,
+        prev_chunk_left_over_len: int | jax.Array | None,
+        inference_delay: int | jax.Array,
+        prefix_horizon: int | jax.Array | None,
+        max_guidance_weight: float | jax.Array,
+        prefix_attention_schedule: int | jax.Array,
+    ) -> jax.Array:
+        """Sample with Kinetix-style VJP guidance for the previous chunk prefix."""
+        if prev_chunk_left_over_len is None:
+            prev_chunk_left_over_len = prev_chunk_left_over.shape[1]
+        if prefix_horizon is None:
+            prefix_horizon = self.action_horizon
+
+        # The server always pads the previous chunk to this fixed shape. Keep a
+        # defensive pad for direct callers while masking padded rows via the
+        # real leftover length below.
+        if prev_chunk_left_over.shape[1] < self.action_horizon:
+            padded = jnp.zeros((batch_size, self.action_horizon, self.action_dim), dtype=noise.dtype)
+            padded = padded.at[:, : prev_chunk_left_over.shape[1], :].set(prev_chunk_left_over)
+            prev_chunk_left_over = padded
+
+        effective_horizon = jnp.minimum(prefix_horizon, prev_chunk_left_over_len)
+        effective_horizon = jnp.minimum(effective_horizon, self.action_horizon)
+        weights = get_prefix_weights(
+            inference_delay,
+            effective_horizon,
+            self.action_horizon,
+            prefix_attention_schedule,
+        )[None, :, None]
+
+        def step(carry, _):
+            x_t, time = carry
+            expanded_time = jnp.broadcast_to(time, (batch_size,))
+
+            def denoiser(x_t_arg):
+                suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
+                    observation, x_t_arg, expanded_time
+                )
+                suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+                prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+                full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
+                positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
+                (_, suffix_out), _ = self.PaliGemma.llm(
+                    [None, suffix_tokens],
+                    mask=full_attn_mask,
+                    positions=positions,
+                    kv_cache=kv_cache,
+                    adarms_cond=[None, adarms_cond],
+                )
+                v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+                return x_t_arg - time * v_t, v_t
+
+            x_0, vjp_fn, v_t = jax.vjp(denoiser, x_t, has_aux=True)
+            error = (prev_chunk_left_over - x_0) * weights
+            correction = vjp_fn(error)[0]
+
+            # Convert OpenPI time (1 -> 0) to the paper's tau (0 -> 1).
+            tau = 1.0 - time
+            inv_r2 = (time**2 + tau**2) / (time**2 + 1e-8)
+            c = jnp.where(tau > 1e-8, time / tau, max_guidance_weight)
+            guidance_weight = jnp.minimum(c * inv_r2, max_guidance_weight)
+            guided_velocity = v_t - guidance_weight * correction
+            return (x_t + dt * guided_velocity, time + dt), None
+
+        (x_0, _), _ = jax.lax.scan(step, (noise, jnp.array(1.0)), length=num_steps)
         return x_0

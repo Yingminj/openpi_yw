@@ -17,7 +17,7 @@ The `env` argument specifies which $\pi_0$ checkpoint should be loaded. Under th
 uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi0_fast_droid --policy.dir=gs://openpi-assets/checkpoints/pi0_fast_droid
 ```
 
-This will start a policy server that will serve the policy specified by the `config` and `dir` arguments. The policy will be served on the specified port (default: 8000).
+This will start a policy server that will serve the policy specified by the `config` and `dir` arguments. The policy will be served on the specified port (default: 1234).
 
 ## Querying the remote policy server from your robot code
 
@@ -37,8 +37,8 @@ from openpi_client import image_tools
 from openpi_client import websocket_client_policy
 
 # Outside of episode loop, initialize the policy client.
-# Point to the host and port of the policy server (localhost and 8000 are the defaults).
-client = websocket_client_policy.WebsocketClientPolicy(host="localhost", port=8000)
+# Point to the host and port of the policy server (localhost and 1234 are the defaults).
+client = websocket_client_policy.WebsocketClientPolicy(host="localhost", port=1234)
 
 for step in range(num_steps):
     # Inside the episode loop, construct the observation.
