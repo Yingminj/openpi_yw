@@ -1615,8 +1615,8 @@ _CONFIGS = [
             "gs://openpi-assets/checkpoints/pi05_base/params",
             missing_regex=".*lora.*|action_in_proj.*|action_out_proj.*",
         ),
-        batch_size=6,
-        num_workers=32,
+        batch_size=4,
+        num_workers=24,
         num_train_steps=100_000,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
