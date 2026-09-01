@@ -1612,7 +1612,7 @@ _CONFIGS = [
             default_prompt="stack the yellow box on top of blue box, then stack the red box on top of yellow box",  # TODO: confirm the actual task description
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "gs://openpi-assets/checkpoints/pi05_base/params",
+            "/ssd/hhw/openpi-hzh/checkpoint/pi05_base/params",
             missing_regex=".*lora.*|action_in_proj.*|action_out_proj.*",
         ),
         batch_size=4,
