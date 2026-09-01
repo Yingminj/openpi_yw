@@ -1605,6 +1605,7 @@ _CONFIGS = [
             pi05=True,
             action_dim=54,
             action_horizon=50,
+            max_token_len=256,
         ),
         data=LeRobotDexhandBimanualJointDataConfig(
             repo_id="/root/repo/lerobot_training/data/dex_stack_300",
