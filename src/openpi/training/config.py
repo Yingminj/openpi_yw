@@ -22,6 +22,7 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.bimanual_eef_policy as bimanual_eef_policy
 import openpi.policies.bimanual_eef_rot6d_policy as bimanual_eef_rot6d_policy
 import openpi.policies.bimanual_joint_policy as bimanual_joint_policy
+import openpi.policies.dexhand_bimanual_joint_policy as dexhand_bimanual_joint_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.policies.single_joint_policy as single_joint_policy
@@ -517,6 +518,49 @@ class LeRobotBimanualJointDataConfig(DataConfigFactory):
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
             )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory(default_prompt=self.default_prompt)(model_config),
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotDexhandBimanualJointDataConfig(DataConfigFactory):
+    """Data config for 54-dim dexhand bimanual joint-position datasets in LeRobot format.
+
+    State/action order is: [left arm (7), left hand (20), right arm (7), right hand (20)].
+    """
+
+    action_sequence_keys: Sequence[str] = ("action",)
+    image_key: str = "observation.images.top"
+    left_wrist_image_key: str = "observation.images.wrist_L"
+    right_wrist_image_key: str = "observation.images.wrist_R"
+    state_key: str = "observation.state"
+    actions_key: str = "action"
+    default_prompt: str | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_structure = {
+            "image": self.image_key,
+            "left_wrist_image": self.left_wrist_image_key,
+            "right_wrist_image": self.right_wrist_image_key,
+            "state": self.state_key,
+            "actions": self.actions_key,
+        }
+        if self.default_prompt is None:
+            repack_structure["prompt"] = "prompt"
+
+        repack_transform = _transforms.Group(inputs=[_transforms.RepackTransform(repack_structure)])
+
+        data_transforms = _transforms.Group(
+            inputs=[dexhand_bimanual_joint_policy.DexhandBimanualJointInputs()],
+            outputs=[dexhand_bimanual_joint_policy.DexhandBimanualJointOutputs()],
+        )
 
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
@@ -1548,6 +1592,41 @@ _CONFIGS = [
         save_interval = 5000,
         wandb_enabled=False,
         num_workers=4
+    ),
+    # Marvin 双臂灵巧手（dexhand）关节空间训练配置。
+    # state/action 均为 54D：[left arm(7), left hand(20), right arm(7), right hand(20)]。
+    # action_dim(54) 超过 pi05_base checkpoint 训练时用的 32D，所以 action_in_proj/action_out_proj
+    # 这两层无法从 checkpoint 加载（形状不匹配），用 missing_regex 让它们保留随机初始化，其余（视觉/语言
+    # backbone、gemma action expert 主体）仍从 pi05_base 加载。
+    TrainConfig(
+        name="pi05_marvin_dexhand_stack_blue",
+        exp_name="dexhand_stack_base",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=54,
+            action_horizon=50,
+        ),
+        data=LeRobotDexhandBimanualJointDataConfig(
+            repo_id="/root/repo/lerobot_training/data/dex_stack_300",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="stack the yellow box on top of blue box, then stack the red box on top of yellow box",  # TODO: confirm the actual task description
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params",
+            missing_regex=".*lora.*|action_in_proj.*|action_out_proj.*",
+        ),
+        batch_size=6,
+        num_workers=32,
+        num_train_steps=100_000,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=5e-5,
+            decay_steps=30_000,
+            decay_lr=5e-7,
+        ),
+        save_interval=5_000,
+        keep_period=10_000,
+        wandb_enabled=True,
     ),
     TrainConfig(
         name="pi05_hhw_dajian",
